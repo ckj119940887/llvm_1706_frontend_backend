@@ -39,6 +39,16 @@
 *.out
 *.app
 
+# Output binaries
+bin/
+
+# LLVM / compiler intermediates (generated IR, bitcode, assembly)
+*.ll
+*.bc
+*.s
+*.i
+*.ii
+
 # Build directories
 build/
 Build/
@@ -67,3 +77,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# OS & IDE (VSCode config is intentionally kept)
+.DS_Store
+.idea/
+*.user
