@@ -1,0 +1,8 @@
+#!/bin/sh
+# Ubuntu 24.04 通过 /etc/profile.d/debuginfod.sh 注入了
+#   DEBUGINFOD_URLS=https://debuginfod.ubuntu.com
+# 该服务器在本机网络下 TCP 能连上但永不返回数据，gdb 的 debuginfod 客户端
+# 没有超时，会在加载符号时无限阻塞，表现为 VS Code 里程序永远 running、
+# 终端无任何输出。这里在 exec 真正的 gdb 之前把它摘掉。
+unset DEBUGINFOD_URLS
+exec /usr/bin/gdb "$@"
