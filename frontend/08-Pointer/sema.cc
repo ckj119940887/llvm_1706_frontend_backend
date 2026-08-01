@@ -92,7 +92,7 @@ std::shared_ptr<AstNode> Sema::SemaUnaryExprNode(std::shared_ptr<AstNode> unary,
     case UnaryOp::logical_not:
     case UnaryOp::bitwise_not:
     {
-        if (unary->GetKind() != CType::TY_Int)
+        if (unary->ty->GetKind() != CType::TY_Int)
         {
             diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_type, "int type");
         }
@@ -112,7 +112,7 @@ std::shared_ptr<AstNode> Sema::SemaUnaryExprNode(std::shared_ptr<AstNode> unary,
     {
         // *a
         // 一定要是指针类型
-        if (unary->GetKind() != CType::TY_Point)
+        if (unary->ty->GetKind() != CType::TY_Point)
         {
             diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_type, "pointer type");
         }
@@ -148,7 +148,7 @@ std::shared_ptr<AstNode> Sema::SemaThreeExprNode(std::shared_ptr<AstNode> cond, 
     node->cond = cond;
     node->then = then;
     node->els = els;
-    if (then->GetKind() != els->GetKind())
+    if (then->ty->GetKind() != els->ty->GetKind())
     {
         diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_same_type);
     }

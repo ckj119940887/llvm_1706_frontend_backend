@@ -6,8 +6,10 @@ class LexerTest : public ::testing::Test
 {
 public:
     void SetUp() override {
-        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buf = llvm::MemoryBuffer::getFile("../testset/lexer_01.txt");
-        ASSERT_TRUE(buf) << "can't open file!!!";
+        /// TESTSET_DIR 由 CMake 注入的绝对路径，跟当前工作目录无关
+        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buf =
+            llvm::MemoryBuffer::getFile(TESTSET_DIR "/lexer_01.txt");
+        ASSERT_TRUE(buf) << "can't open file: " << TESTSET_DIR "/lexer_01.txt";
 
         /// mgr / diagEngine 必须是成员: Lexer 持有的是它们的引用，
         /// 放在栈上出了 SetUp 就悬空了
