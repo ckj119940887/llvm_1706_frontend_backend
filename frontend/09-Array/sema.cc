@@ -12,8 +12,11 @@ std::shared_ptr<AstNode> Sema::SemaVariableDeclNode(Token tok, std::shared_ptr<C
         diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_redefined, text);
     }
 
-    // 添加到符号表
-    scope.AddSymbol(SymbolKind::LocalVariable, ty, text);
+    if (mode == Mode::Normal)
+    {
+        // 添加到符号表
+        scope.AddSymbol(SymbolKind::LocalVariable, ty, text);
+    }
 
     auto variableDecl = std::make_shared<VariableDecl>();
     variableDecl->tok = tok;
@@ -28,7 +31,7 @@ std::shared_ptr<AstNode> Sema::SemaVariableAccessNode(Token tok)
     // 这个查找要在全部的env中进行查找
     llvm::StringRef text(tok.ptr, tok.len);
     std::shared_ptr<Symbol> symbol = scope.FindVarSymbol(text);
-    if (symbol == nullptr)
+    if (symbol == nullptr && mode == Mode::Normal)
     {
         // 没有找到
         diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_undefined, text);
@@ -92,7 +95,7 @@ std::shared_ptr<AstNode> Sema::SemaUnaryExprNode(std::shared_ptr<AstNode> unary,
     case UnaryOp::logical_not:
     case UnaryOp::bitwise_not:
     {
-        if (unary->ty->GetKind() != CType::TY_Int)
+        if (unary->ty->GetKind() != CType::TY_Int && mode == Mode::Normal)
         {
             diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_type, "int type");
         }
@@ -101,7 +104,7 @@ std::shared_ptr<AstNode> Sema::SemaUnaryExprNode(std::shared_ptr<AstNode> unary,
     }
     case UnaryOp::addr:
     {
-        if (!unary->isLValue)
+        if (!unary->isLValue && mode == Mode::Normal)
         {
             diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_lvalue);
         }
@@ -112,7 +115,7 @@ std::shared_ptr<AstNode> Sema::SemaUnaryExprNode(std::shared_ptr<AstNode> unary,
     {
         // *a
         // 一定要是指针类型
-        if (unary->ty->GetKind() != CType::TY_Point)
+        if (unary->ty->GetKind() != CType::TY_Point && mode == Mode::Normal)
         {
             diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_type, "pointer type");
         }
@@ -128,7 +131,7 @@ std::shared_ptr<AstNode> Sema::SemaUnaryExprNode(std::shared_ptr<AstNode> unary,
     case UnaryOp::inc:
     case UnaryOp::dec:
     {
-        if (!unary->isLValue)
+        if (!unary->isLValue && mode == Mode::Normal)
         {
             diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_lvalue);
         }
@@ -148,7 +151,7 @@ std::shared_ptr<AstNode> Sema::SemaThreeExprNode(std::shared_ptr<AstNode> cond, 
     node->cond = cond;
     node->then = then;
     node->els = els;
-    if (then->ty->GetKind() != els->ty->GetKind())
+    if (then->ty->GetKind() != els->ty->GetKind() && mode == Mode::Normal)
     {
         diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_same_type);
     }
@@ -167,7 +170,7 @@ std::shared_ptr<AstNode> Sema::SemaSizeOfExprNode(std::shared_ptr<AstNode> unary
 
 std::shared_ptr<AstNode> Sema::SemaPostIncExprNode(std::shared_ptr<AstNode> left, Token tok)
 {
-    if (!left->isLValue)
+    if (!left->isLValue && mode == Mode::Normal)
     {
         diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_lvalue);
     }
@@ -179,7 +182,7 @@ std::shared_ptr<AstNode> Sema::SemaPostIncExprNode(std::shared_ptr<AstNode> left
 
 std::shared_ptr<AstNode> Sema::SemaPostDecExprNode(std::shared_ptr<AstNode> left, Token tok)
 {
-    if (!left->isLValue)
+    if (!left->isLValue && mode == Mode::Normal)
     {
         diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_lvalue);
     }
@@ -187,6 +190,44 @@ std::shared_ptr<AstNode> Sema::SemaPostDecExprNode(std::shared_ptr<AstNode> left
     node->left = left;
     node->ty = left->ty;
     return node;
+}
+
+// a[1] -> *(a + offset(1 * elementSize))
+std::shared_ptr<AstNode> Sema::SemaPostSubscript(std::shared_ptr<AstNode> left, std::shared_ptr<AstNode> node, Token tok)
+{
+    if (left->ty->GetKind() != CType::TY_Array && left->ty->GetKind() != CType::TY_Point && mode == Mode::Normal)
+    {
+        diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_type, "array or point");
+    }
+    auto post = std::make_shared<PostSubscript>();
+    post->left = left;
+    post->node = node;
+    if (left->ty->GetKind() == CType::TY_Array)
+    {
+        CArrayType *arrType = llvm::dyn_cast<CArrayType>(left->ty.get());
+        post->ty = arrType->GetElementType();
+    }
+    else if (left->ty->GetKind() == CType::TY_Point)
+    {
+        CPointType *pointType = llvm::dyn_cast<CPointType>(left->ty.get());
+        post->ty = pointType->GetBaseType();
+    }
+    return post;
+}
+
+std::shared_ptr<VariableDecl::InitValue> Sema::SemaInitValue(std::shared_ptr<CType> declType, std::shared_ptr<AstNode> value, std::vector<int> &offsetList, Token tok)
+{
+    if (declType->GetKind() != value->ty->GetKind() && mode == Mode::Normal)
+    {
+        diagEngine.Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_miss, "same type");
+    }
+
+    auto initValue = std::make_shared<VariableDecl::InitValue>();
+    initValue->declType = declType;
+    initValue->value = value;
+    initValue->offsetList = offsetList;
+
+    return initValue;
 }
 
 void Sema::EnterScope()
@@ -197,4 +238,9 @@ void Sema::EnterScope()
 void Sema::ExitScope()
 {
     scope.ExitScope();
+}
+
+void Sema::SetMode(Mode mode)
+{
+    this->mode = mode;
 }

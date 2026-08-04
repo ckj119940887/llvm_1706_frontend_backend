@@ -4,10 +4,12 @@
 // block-stmt ::= stmt*
 // stmt       ::= decl-stmt | expr-stmt | null-stmt | if-stmt | block-stmt | for-stmt | break-stmt | continue-stmt
 // decl-stmt  ::= decl-spec init-declarator-list? ";"
-// init-declarator-list ::= declarator (= assign)? ("," declarator (= assign)?)*
+// init-declarator-list ::= declarator (= initializer)? ("," declarator (= initializer)?)*
 // decl-spec  ::= "int"
 // declarator ::= "*"* direct-declarator
-// direct-declarator ::= identifier
+// direct-declarator ::= identifier | direct-declarator "[" assign "]"
+
+// initializer ::= assign | "{" initializer ("," initializer)*  "}"
 
 // null-stmt     ::= ";"
 // if-stmt       ::= "if" "(" expr ")" stmt ( "else" stmt )?
@@ -34,10 +36,13 @@
 // cast        ::= unary | "(" type-name ")" cast
 // unary       ::= postfix | ("++"|"--"|"&"|"*"|"+"|"-"|"~"|"!"|"sizeof") unary
 //                 | "sizeof" "(" type-name ")"
-// postfix     ::= primary ("++"|"--")*
+// postfix     ::= primary | postfix ("++"|"--") | postfix "[" expr "]"
 // primary     ::= identifier | number | "(" expr ")"
 // number      ::= ([0-9])+
 // identifier  ::= (a-zA-Z_)(a-zA-Z0-9_)*
+// type-name   ::= decl-spec abstract-declarator?
+// abstract-declarator ::= "*"* direct-abstract-declarator?
+// direct-abstract-declarator ::=  direct-abstract-declarator? "[" assign "]"
 std::shared_ptr<Program> Parser::ParseProgram()
 {
     auto program = std::make_shared<Program>();
@@ -176,18 +181,132 @@ std::shared_ptr<AstNode> Parser::Declarator(std::shared_ptr<CType> baseType)
         baseType = std::make_shared<CPointType>(baseType);
     }
 
-    Expect(TokenType::identifier);
-    auto decl = sema.SemaVariableDeclNode(tok, baseType);
-    Consume(TokenType::identifier);
+    return DirectDeclarator(baseType);
+}
+
+bool Parser::ParseInitializer(std::vector<std::shared_ptr<VariableDecl::InitValue>> &arr, std::shared_ptr<CType> declType, std::vector<int> &offsetList, bool hasLBrace)
+{
+    if (tok.tokenType == TokenType::r_brace)
+    {
+        if (!hasLBrace)
+        {
+            GetDiagEngine().Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_miss, "miss '{'");
+        }
+        return true;
+    }
+
+    // {}
+    if (tok.tokenType == TokenType::l_brace)
+    {
+        Consume(TokenType::l_brace);
+        if (declType->GetKind() == CType::TY_Array)
+        {
+            CArrayType *arrType = llvm::dyn_cast<CArrayType>(declType.get());
+            int size = arrType->GetElementCount();
+            for (int i = 0; i < size; i++)
+            {
+                if (i > 0 && tok.tokenType == TokenType::comma)
+                {
+                    Consume(TokenType::comma);
+                }
+                offsetList.push_back(i);
+                bool end = ParseInitializer(arr, arrType->GetElementType(), offsetList, true);
+                offsetList.pop_back();
+                if (end)
+                {
+                    break;
+                }
+            }
+        }
+        Consume(TokenType::r_brace);
+    }
+    else
+    {
+        Token tmp = tok;
+        // assign
+        auto node = ParseAssignExpr();
+
+        auto initValue = sema.SemaInitValue(declType, node, offsetList, tok);
+
+        arr.push_back(initValue);
+    }
+    return false;
+}
+
+// int a[2][3][4];
+std::shared_ptr<CType> Parser::DirectDeclaratorArraySuffix(std::shared_ptr<CType> baseType)
+{
+    if (tok.tokenType != TokenType::l_bracket)
+    {
+        return baseType;
+    }
+
+    Consume(TokenType::l_bracket);
+    Expect(TokenType::number);
+    int count = tok.value;
+    Consume(TokenType::number);
+    Consume(TokenType::r_bracket);
+    return std::make_shared<CArrayType>(DirectDeclaratorArraySuffix(baseType), count);
+}
+
+std::shared_ptr<CType> Parser::DirectDeclaratorSuffix(std::shared_ptr<CType> baseType)
+{
+    if (tok.tokenType == TokenType::l_bracket)
+    {
+        return DirectDeclaratorArraySuffix(baseType);
+    }
+    return baseType;
+}
+
+// direct-declarator ::= identifier | "(" declarator ")" | direct-declarator "[" assign "]"
+std::shared_ptr<AstNode> Parser::DirectDeclarator(std::shared_ptr<CType> baseType)
+{
+    std::shared_ptr<AstNode> declNode;
+    if (tok.tokenType == TokenType::l_parent)
+    {
+        Token beginTok = tok;
+        lexer.SaveState();
+
+        sema.SetMode(Sema::Mode::Skip);
+        Consume(TokenType::l_parent);
+        Declarator(CType::IntType);
+        Consume(TokenType::r_parent);
+
+        baseType = DirectDeclaratorSuffix(baseType);
+
+        lexer.RestoreState();
+        sema.SetMode(Sema::Mode::Normal);
+        tok = beginTok;
+
+        Consume(TokenType::l_parent);
+        declNode = Declarator(baseType);
+        Consume(TokenType::r_parent);
+        DirectDeclaratorSuffix(CType::IntType);
+    }
+    else if (tok.tokenType == TokenType::identifier)
+    {
+        Token iden = tok;
+        Consume(TokenType::identifier);
+        // a[2][3][4];
+        baseType = DirectDeclaratorSuffix(baseType);
+
+        /// 必须用之前存下来的 iden，此时 tok 已经走到 '[' 之后的下一个 token 了
+        declNode = sema.SemaVariableDeclNode(iden, baseType);
+    }
+    else
+    {
+        GetDiagEngine().Report(llvm::SMLoc::getFromPointer(tok.ptr), diag::err_expected_ex, "identifier or '('");
+    }
 
     if (tok.tokenType == TokenType::equal)
     {
         Advance();
-        VariableDecl *varDecl = llvm::dyn_cast<VariableDecl>(decl.get());
-        varDecl->init = ParseAssignExpr();
+        VariableDecl *varDecl = llvm::dyn_cast<VariableDecl>(declNode.get());
+        std::vector<int> offsetList;
+        ParseInitializer(varDecl->initValues, declNode->ty, offsetList, false);
     }
 
-    return decl;
+    return declNode;
 }
 
 // decl-spec  ::= "int"
@@ -695,11 +814,21 @@ std::shared_ptr<AstNode> Parser::ParsePostFixExpr()
             left = sema.SemaPostIncExprNode(left, tmp);
             continue;
         }
-        else if (tok.tokenType == TokenType::minus_minus)
+        if (tok.tokenType == TokenType::minus_minus)
         {
             Token tmp = tok;
             Consume(TokenType::minus_minus);
             left = sema.SemaPostDecExprNode(left, tmp);
+            continue;
+        }
+        // a[3][5]++
+        if (tok.tokenType == TokenType::l_bracket)
+        {
+            Token tmp = tok;
+            Consume(TokenType::l_bracket);
+            auto node = ParseExpr();
+            Consume(TokenType::r_bracket);
+            left = sema.SemaPostSubscript(left, node, tok);
             continue;
         }
         break;
@@ -764,18 +893,21 @@ bool Parser::IsUnaryOperator()
 
 std::shared_ptr<CType> Parser::ParseType()
 {
-    std::shared_ptr<CType> baseType = nullptr;
-    if (tok.tokenType == TokenType::kw_int)
-    {
-        baseType = CType::IntType;
-        Consume(TokenType::kw_int);
-    }
+    std::shared_ptr<CType> baseType = ParseDeclSpec();
     assert(baseType);
+
+    // sizeof(int *[5][6])
     while (tok.tokenType == TokenType::star)
     {
         baseType = std::make_shared<CPointType>(baseType);
         Consume(TokenType::star);
     }
+
+    if (tok.tokenType == TokenType::l_bracket)
+    {
+        baseType = DirectDeclaratorArraySuffix(baseType);
+    }
+
     return baseType;
 }
 

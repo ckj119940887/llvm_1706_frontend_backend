@@ -1,0 +1,21 @@
+#include "diag_engine.h"
+
+static const char *diag_msg[] = {
+#define DIAG(ID, KIND, MSG) MSG, // 只取第三列
+#include "diag.inc"
+};
+
+static llvm::SourceMgr::DiagKind diag_kind[] = {
+#define DIAG(ID, KIND, MSG) llvm::SourceMgr::DK_##KIND, // 只取第二列
+#include "diag.inc"
+};
+
+llvm::SourceMgr::DiagKind DiagEngine::GetDiagKind(unsigned id)
+{
+    return diag_kind[id];
+}
+
+const char *DiagEngine::GetDiagMsg(unsigned id)
+{
+    return diag_msg[id];
+}

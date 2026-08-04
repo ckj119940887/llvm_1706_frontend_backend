@@ -46,11 +46,11 @@ llvm::Value *CodeGen::VisitProgram(Program *p)
     llvm::Value *ret = irBuilder.CreateRet(lastVal);
     verifyFunction(*mFunc);
 
-    if(verifyModule(*module, &llvm::outs())) 
+    if (verifyModule(*module, &llvm::outs()))
     {
         module->print(llvm::outs(), nullptr);
     }
-    
+
     return ret;
 }
 
@@ -210,25 +210,27 @@ llvm::Value *CodeGen::VisitBinaryExpr(BinaryExpr *binaryExpr)
     case BinaryOp::add:
     {
         llvm::Type *ty = binaryExpr->left->ty->Accept(this);
-        if(ty->isPointerTy()) {
+        if (ty->isPointerTy())
+        {
             // GEP = GetElementPtr，LLVM 里唯一的地址计算指令。它不访问内存，只做「基地址 + 偏移」的算术，返回一个新指针。
             // CreateInBoundsGEP(Type *SrcElemTy, Value *Ptr, ArrayRef<Value*> IdxList)
             llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, left, {right});
             return newVal;
         }
-        else 
+        else
         {
             return irBuilder.CreateNSWAdd(left, right);
         }
-    }    
+    }
     case BinaryOp::sub:
     {
         llvm::Type *ty = binaryExpr->left->ty->Accept(this);
-        if(ty->isPointerTy()) {
+        if (ty->isPointerTy())
+        {
             llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, left, {irBuilder.CreateNeg(right)});
             return newVal;
         }
-        else 
+        else
         {
             return irBuilder.CreateNSWSub(left, right);
         }
@@ -374,12 +376,13 @@ llvm::Value *CodeGen::VisitBinaryExpr(BinaryExpr *binaryExpr)
         llvm::LoadInst *load = llvm::dyn_cast<llvm::LoadInst>(left);
         assert(load);
         llvm::Type *ty = binaryExpr->left->ty->Accept(this);
-        if(ty->isPointerTy()) {
+        if (ty->isPointerTy())
+        {
             llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, left, {right});
             irBuilder.CreateStore(newVal, load->getPointerOperand());
             return newVal;
         }
-        else 
+        else
         {
             llvm::Value *tmp = irBuilder.CreateAdd(left, right);
             irBuilder.CreateStore(tmp, load->getPointerOperand());
@@ -391,12 +394,13 @@ llvm::Value *CodeGen::VisitBinaryExpr(BinaryExpr *binaryExpr)
         llvm::LoadInst *load = llvm::dyn_cast<llvm::LoadInst>(left);
         assert(load);
         llvm::Type *ty = binaryExpr->left->ty->Accept(this);
-        if(ty->isPointerTy()) {
+        if (ty->isPointerTy())
+        {
             llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, left, {irBuilder.CreateNeg(right)});
             irBuilder.CreateStore(newVal, load->getPointerOperand());
             return newVal;
         }
-        else 
+        else
         {
             llvm::Value *tmp = irBuilder.CreateSub(left, right);
             irBuilder.CreateStore(tmp, load->getPointerOperand());
@@ -514,74 +518,76 @@ llvm::Value *CodeGen::VisitUnaryExpr(UnaryExpr *unaryExpr)
     llvm::Value *val = unaryExpr->node->Accept(this);
     llvm::Type *ty = unaryExpr->node->ty->Accept(this);
 
-    switch(unaryExpr->op) {
-        case UnaryOp::positive:
-            return val;
-        case UnaryOp::negative:
+    switch (unaryExpr->op)
+    {
+    case UnaryOp::positive:
+        return val;
+    case UnaryOp::negative:
+    {
+        return irBuilder.CreateNeg(val);
+    }
+    case UnaryOp::logical_not:
+    {
+        llvm::Value *tmp = irBuilder.CreateICmpNE(val, irBuilder.getInt32(0));
+        return irBuilder.CreateZExt(irBuilder.CreateNot(tmp), irBuilder.getInt32Ty());
+    }
+    case UnaryOp::bitwise_not:
+    {
+        return irBuilder.CreateNot(val);
+    }
+    case UnaryOp::addr:
+        return llvm::dyn_cast<LoadInst>(val)->getPointerOperand();
+    case UnaryOp::deref:
+    {
+        llvm::Type *ty = unaryExpr->ty->Accept(this);
+        return irBuilder.CreateLoad(ty, val);
+    }
+    case UnaryOp::inc:
+    {
+        // ++a
+        if (ty->isPointerTy())
         {
-            return irBuilder.CreateNeg(val);
+            llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, val, {irBuilder.getInt32(1)});
+            irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
+            return newVal;
         }
-        case UnaryOp::logical_not:
+        else if (ty->isIntegerTy())
         {
-            llvm::Value *tmp = irBuilder.CreateICmpNE(val, irBuilder.getInt32(0));
-            return irBuilder.CreateZExt(irBuilder.CreateNot(tmp), irBuilder.getInt32Ty());
+            llvm::Value *newVal = irBuilder.CreateAdd(val, irBuilder.getInt32(1));
+            irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
+            return newVal;
         }
-        case UnaryOp::bitwise_not:
+        else
         {
-            return irBuilder.CreateNot(val);
+            assert(0);
+            return nullptr;
         }
-        case UnaryOp::addr:
-            return llvm::dyn_cast<LoadInst>(val)->getPointerOperand();
-        case UnaryOp::deref:{
-            llvm::Type *ty = unaryExpr->ty->Accept(this);
-            return irBuilder.CreateLoad(ty, val);
-        }
-        case UnaryOp::inc:
+    }
+    case UnaryOp::dec:
+    {
+        // --a
+        if (ty->isPointerTy())
         {
-            // ++a
-            if (ty->isPointerTy())
-            {
-                llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, val, {irBuilder.getInt32(1)});
-                irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
-                return newVal;
-            }
-            else if (ty->isIntegerTy())
-            {
-                llvm::Value *newVal = irBuilder.CreateAdd(val, irBuilder.getInt32(1));
-                irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
-                return newVal;
-            }
-            else
-            {
-                assert(0);
-                return nullptr;
-            }
+            llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, val, {irBuilder.getInt32(-1)});
+            irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
+            return newVal;
         }
-        case UnaryOp::dec:
+        else if (ty->isIntegerTy())
         {
-            // --a
-            if (ty->isPointerTy())
-            {
-                llvm::Value *newVal = irBuilder.CreateInBoundsGEP(ty, val, {irBuilder.getInt32(-1)});
-                irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
-                return newVal;
-            }
-            else if (ty->isIntegerTy())
-            {
-                llvm::Value *newVal = irBuilder.CreateSub(val, irBuilder.getInt32(1));
-                irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
-                return newVal;
-            }
-            else
-            {
-                assert(0);
-                return nullptr;
-            }
+            llvm::Value *newVal = irBuilder.CreateSub(val, irBuilder.getInt32(1));
+            irBuilder.CreateStore(newVal, llvm::dyn_cast<LoadInst>(val)->getPointerOperand());
+            return newVal;
         }
-        default:
+        else
+        {
+            assert(0);
+            return nullptr;
+        }
+    }
+    default:
         break;
     }
-    
+
     return nullptr;
 }
 
@@ -661,6 +667,15 @@ llvm::Value *CodeGen::VisitPostDecExpr(PostDecExpr *postDecExpr)
     }
 }
 
+llvm::Value *CodeGen::VisitPostSubscript(PostSubscript *postSubscript)
+{
+    llvm::Type *ty = postSubscript->ty->Accept(this);
+    llvm::Value *left = postSubscript->left->Accept(this);
+    llvm::Value *offset = postSubscript->node->Accept(this);
+    llvm::Value *addr = irBuilder.CreateInBoundsGEP(ty, llvm::dyn_cast<LoadInst>(left)->getPointerOperand(), {offset});
+    return irBuilder.CreateLoad(ty, addr);
+}
+
 llvm::Value *CodeGen::VisitVariableDecl(VariableDecl *decl)
 {
     llvm::Type *ty = decl->ty->Accept(this);
@@ -682,10 +697,35 @@ llvm::Value *CodeGen::VisitVariableDecl(VariableDecl *decl)
     llvm::Value *value = irBuilder.CreateAlloca(ty, nullptr, text);
     varAddrTypeMap.insert({text, {value, ty}});
 
-    if (decl->init)
+    if (decl->initValues.size() > 0)
     {
-        llvm::Value *initValue = decl->init->Accept(this);
-        irBuilder.CreateStore(initValue, value);
+        if (decl->initValues.size() == 1)
+        {
+            llvm::Value *initValue = decl->initValues[0]->value->Accept(this);
+            irBuilder.CreateStore(initValue, value);
+        }
+        else
+        {
+            if (llvm::ArrayType *arrType = llvm::dyn_cast<llvm::ArrayType>(ty))
+            {
+                for (const auto &initValue : decl->initValues)
+                {
+
+                    llvm::SmallVector<llvm::Value *> vec;
+                    for (auto &offset : initValue->offsetList)
+                    {
+                        vec.push_back(irBuilder.getInt32(offset));
+                    }
+                    llvm::Value *addr = irBuilder.CreateInBoundsGEP(arrType->getElementType(), value, vec);
+                    llvm::Value *v = initValue->value->Accept(this);
+                    irBuilder.CreateStore(v, addr);
+                }
+            }
+            else
+            {
+                assert(0);
+            }
+        }
     }
 
     return value;
@@ -742,4 +782,10 @@ llvm::Type *CodeGen::VisitPointType(CPointType *ty)
 {
     llvm::Type *baseType = ty->GetBaseType()->Accept(this);
     return llvm::PointerType::getUnqual(baseType);
+}
+
+llvm::Type *CodeGen::VisitArrayType(CArrayType *ty)
+{
+    llvm::Type *elementType = ty->GetElementType()->Accept(this);
+    return llvm::ArrayType::get(elementType, ty->GetElementCount());
 }
