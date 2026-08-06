@@ -1,0 +1,2 @@
+{struct A{int a,b; int *p; struct {int a; int c;} d;} b; struct A *a = &b; b.d.a = 11; a->d.a;}
+//{struct A{int a,b; int *p;} b; struct A *a = &b; b.a = 11; a->a;}
