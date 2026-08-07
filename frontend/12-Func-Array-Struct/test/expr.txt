@@ -1,0 +1,11 @@
+// int main() {int a = 0; int b = 3; a = 2; return a;}
+struct A 
+{
+    int a;
+    struct A *p;
+};
+
+int main()
+{
+    return 0;
+}

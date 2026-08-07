@@ -1,0 +1,56 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "variable debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/expr",
+            "args": [
+                "test/expr.txt"
+            ],
+            "stopAtEntry": false,
+            "setupCommands": [
+                {
+                    // 关键：Ubuntu 24.04 给全局注入了 DEBUGINFOD_URLS=https://debuginfod.ubuntu.com。
+                    // gdb 停下 inferior 加载符号时会去这个服务器拉调试信息，连接挂住不返回，
+                    // gdb 就再也回不到 MI prompt，表现为程序永远 running、终端无任何输出。
+                    // ~/.gdbinit 里那条同样的设置对 cpptools 启动的 gdb 没生效，所以在这里强制关掉。
+                    "description": "禁用 debuginfod 远程符号下载",
+                    "text": "set debuginfod enabled off",
+                    "ignoreFailures": true
+                },
+                {
+                    // 让 gdb 直接 fork/exec，不经过 /bin/sh -c exec 那层。
+                    // 注：这条不是本次问题的原因，只是少一层中间 shell，可留可删。
+                    "description": "不经过 shell 启动 inferior",
+                    "text": "set startup-with-shell off",
+                    "ignoreFailures": false
+                },
+                {
+                    "description": "为 gdb 启用美化打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build",
+            "environment": [],
+            // 用集成终端跑被调试程序：输出直接进 TERMINAL 面板，
+            // 并且程序拿到真正的 pty，不再有 "Failed to set controlling terminal" 警告
+            "console": "integratedTerminal",
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "linux": {
+                "MIMode": "gdb",
+                // 用 wrapper 启动 gdb，把 DEBUGINFOD_URLS 摘掉。
+                // 见 .vscode/gdb-nodebuginfod
+                "miDebuggerPath": "${workspaceFolder}/.vscode/gdb-nodebuginfod"
+            }
+        }
+    ]
+}
