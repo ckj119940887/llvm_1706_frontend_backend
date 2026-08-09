@@ -1,0 +1,35 @@
+// int main() {int a = 0; int b = 3; a = 2; return a;}
+
+int printf(const char *fmg, ...);
+
+int main()
+{
+    char grade = 'B';
+    int ret = grade;
+
+    switch(grade)
+    {
+        case 'A' :{
+            printf("good \n");
+            break;
+        }
+        case 'B' :
+        case 'C' :{
+            printf("good \n");
+            break;
+        }
+        case 'D' :
+            printf("good \n");
+            break;                      
+        case 'E' :{
+            printf("good \n");
+            break;
+        }        
+        default: {
+            printf("bad \n");
+            break;
+        }
+    }
+
+    return ret;
+}
